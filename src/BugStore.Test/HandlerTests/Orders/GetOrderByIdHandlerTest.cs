@@ -74,7 +74,7 @@ namespace BugStore.Test.HandlerTests.Orders
             Assert.NotNull(response);
             Assert.Equal(fakeOrder.Id, response.Order.Id);
             Assert.Equal(fakeOrder.CustomerId, response.Order.CustomerId);
-            Assert.Equal("Ordem encontrada com sucesso!", response.message);
+            Assert.Equal("Ordem encontrada com sucesso!", response.Message);
         }
 
         [Fact]

@@ -1,0 +1,67 @@
+name: Build and deploy ASP.Net Core app to Azure Web App - StoreApp
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.x'
+
+      - name: Restore
+        run: dotnet restore ./src/BugStore.Api/BugStore.Api.csproj
+
+      - name: Build API
+        run: dotnet build ./src/BugStore.Api/BugStore.Api.csproj --configuration Release --no-restore
+
+      - name: Executar testes
+        run: dotnet test ./src/BugStore.Test/BugStore.Test.csproj --configuration Release --logger trx --results-directory ./TestResults
+
+      - name: Publish API
+        run: dotnet publish ./src/BugStore.Api/BugStore.Api.csproj -c Release -o "${{env.DOTNET_ROOT}}/myapp" --no-build
+
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: .net-app
+          path: ${{env.DOTNET_ROOT}}/myapp
+
+  deploy:
+    runs-on: windows-latest
+    needs: build
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: .net-app
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_3C85D949EF7744DA937F65154BF0D1FE }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_992DBEB6C6E84EB98FF0FD3F24F7FAAA }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_EE8EE0EB75444FBDA3E2DDE53A143725 }}
+
+      - name: Deploy to Azure Web App
+        id: deploy-to-webapp
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'StoreApp'
+          slot-name: 'Production'
+          package: .

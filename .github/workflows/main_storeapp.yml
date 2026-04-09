@@ -1,9 +1,11 @@
-name: Build and deploy ASP.Net Core app to Azure Web App - StoreApp
+name: Build, analyze and deploy ASP.Net Core app to Azure Web App - StoreApp
 
 on:
   push:
     branches:
       - main
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
@@ -14,33 +16,74 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up .NET Core
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.x'
 
-      - name: Restore
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: 'zulu'
+
+      - name: Cache SonarQube Cloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~\sonar\cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Cache SonarQube Cloud scanner
+        id: cache-sonar-scanner
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\scanner
+          key: ${{ runner.os }}-sonar-scanner
+          restore-keys: ${{ runner.os }}-sonar-scanner
+
+      - name: Install SonarQube Cloud scanner
+        if: steps.cache-sonar-scanner.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          New-Item -Path ${{ runner.temp }}\scanner -ItemType Directory -Force
+          dotnet tool update dotnet-sonarscanner --tool-path ${{ runner.temp }}\scanner
+
+      - name: Sonar Begin
+        shell: powershell
+        run: |
+          ${{ runner.temp }}\scanner\dotnet-sonarscanner begin /k:"MathMantovan_StoreApp" /o:"mathmantovan" /d:sonar.token="${{ secrets.SONAR_TOKEN }}" /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
+
+      - name: Restore API
         run: dotnet restore ./src/BugStore.Api/BugStore.Api.csproj
 
       - name: Build API
         run: dotnet build ./src/BugStore.Api/BugStore.Api.csproj --configuration Release --no-restore
 
-      - name: Executar testes
-        run: dotnet test ./src/BugStore.Test/BugStore.Test.csproj --configuration Release --logger trx --results-directory ./TestResults
+      - name: Executar testes com coverage
+        run: dotnet test ./src/BugStore.Test/BugStore.Test.csproj --configuration Release --logger trx --results-directory ./TestResults /p:CollectCoverage=true /p:CoverletOutput=./TestResults/Coverage/ /p:CoverletOutputFormat=opencover
+
+      - name: Sonar End
+        shell: powershell
+        run: |
+          ${{ runner.temp }}\scanner\dotnet-sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
 
       - name: Publish API
-        run: dotnet publish ./src/BugStore.Api/BugStore.Api.csproj -c Release -o "${{env.DOTNET_ROOT}}/myapp" --no-build
+        run: dotnet publish ./src/BugStore.Api/BugStore.Api.csproj -c Release -o "${{ env.DOTNET_ROOT }}/myapp" --no-build
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: .net-app
-          path: ${{env.DOTNET_ROOT}}/myapp
+          path: ${{ env.DOTNET_ROOT }}/myapp
 
   deploy:
     runs-on: windows-latest
     needs: build
+    if: github.event_name != 'pull_request'
     permissions:
       id-token: write
       contents: read
